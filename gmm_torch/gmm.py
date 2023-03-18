@@ -2,7 +2,7 @@ import torch
 import numpy as np
 
 from math import pi, ceil
-from utils import calculate_matmul, find_optimal_splits
+from .utils import calculate_matmul, find_optimal_splits
 
 
 class GaussianMixture(torch.nn.Module):
