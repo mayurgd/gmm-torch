@@ -2,6 +2,7 @@ import torch
 import numpy as np
 
 from math import pi, ceil
+from sklearn.utils import check_random_state
 from .utils import calculate_matmul, find_optimal_splits
 
 
@@ -25,6 +26,7 @@ class GaussianMixture(torch.nn.Module):
         mu_init=None,
         var_init=None,
         covariance_data_type="double",
+        random_state=None,
     ):
         """
         Initializes the model and brings all tensors into their required shape.
@@ -50,6 +52,7 @@ class GaussianMixture(torch.nn.Module):
             eps:                    float
             init_params:            str
             covariance_data_type:   str or torch.dtype
+            random_state:           int, RandomState instance or None, default=None
         """
         super(GaussianMixture, self).__init__()
 
@@ -73,6 +76,7 @@ class GaussianMixture(torch.nn.Module):
 
         self.covariance_type = covariance_type
         self.init_params = init_params
+        self.random_state = random_state
 
         assert self.covariance_type in ["full", "diag"]
         assert self.init_params in ["kmeans", "random"]
@@ -641,10 +645,13 @@ class GaussianMixture(torch.nn.Module):
         x = (x - x_min) / (x_max - x_min)
 
         min_cost = np.inf
+        random_state = check_random_state(self.random_state)
 
         for i in range(init_times):
             tmp_center = x[
-                np.random.choice(np.arange(x.shape[0]), size=n_centers, replace=False),
+                random_state.choice(
+                    np.arange(x.shape[0]), size=n_centers, replace=False
+                ),
                 ...,
             ]
             l2_dis = torch.norm(
