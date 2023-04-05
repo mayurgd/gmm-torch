@@ -76,6 +76,10 @@ class GaussianMixture(torch.nn.Module):
 
         self.covariance_type = covariance_type
         self.init_params = init_params
+        # set random state
+        assert type(random_state) == int, "random_state requires an integer value"
+        if random_state:
+            torch.manual_seed(random_state)
         self.random_state = random_state
 
         assert self.covariance_type in ["full", "diag"]
