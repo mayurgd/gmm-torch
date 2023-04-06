@@ -27,6 +27,7 @@ class GaussianMixture(torch.nn.Module):
         var_init=None,
         covariance_data_type="double",
         random_state=None,
+        batch_size=100,
     ):
         """
         Initializes the model and brings all tensors into their required shape.
@@ -53,6 +54,8 @@ class GaussianMixture(torch.nn.Module):
             init_params:            str
             covariance_data_type:   str or torch.dtype
             random_state:           int, RandomState instance or None, default=None
+            batch_size:             int, number of batches to divide input dataset.
+                                    set higher number if running OOM
         """
         super(GaussianMixture, self).__init__()
 
@@ -77,6 +80,7 @@ class GaussianMixture(torch.nn.Module):
         self.covariance_type = covariance_type
         self.init_params = init_params
         self.random_state = random_state
+        self.batch_size = batch_size
 
         assert self.covariance_type in ["full", "diag"]
         assert self.init_params in ["kmeans", "random"]
@@ -96,6 +100,8 @@ class GaussianMixture(torch.nn.Module):
             # (1, k, d)
             self.mu = torch.nn.Parameter(self.mu_init, requires_grad=False)
         else:
+            if self.random_state:
+                torch.manual_seed(self.random_state)
             self.mu = torch.nn.Parameter(
                 torch.randn(1, self.n_components, self.n_features), requires_grad=False
             )
@@ -227,6 +233,8 @@ class GaussianMixture(torch.nn.Module):
                     mu_init=self.mu_init,
                     var_init=self.var_init,
                     eps=self.eps,
+                    random_state=self.random_state,
+                    batch_size=self.batch_size,
                 )
                 for p in self.parameters():
                     p.data = p.data.to(device)
@@ -301,6 +309,8 @@ class GaussianMixture(torch.nn.Module):
         # Only iterate over components with non-zero counts
         for k in np.arange(self.n_components)[counts > 0]:
             if self.covariance_type == "diag":
+                if self.random_state:
+                    torch.manual_seed(self.random_state)
                 x_k = self.mu[0, k] + torch.randn(
                     int(counts[k]), self.n_features, device=x.device
                 ) * torch.sqrt(self.var[0, k])
@@ -394,9 +404,29 @@ class GaussianMixture(torch.nn.Module):
             mu = self.mu
             prec = torch.rsqrt(self.var)
 
-            log_p = torch.sum(
-                (mu * mu + x * x - 2 * x * mu) * (prec**2), dim=2, keepdim=True
-            )
+            if self.batch_size:
+                chunk_size = x.shape[0] // self.batch_size
+
+                log_p_list = []
+
+                for i in range(self.batch_size):
+                    start_idx = i * chunk_size
+                    end_idx = (i + 1) * chunk_size
+
+                    x_chunk = x[start_idx:end_idx]
+                    log_p_chunk = torch.sum(
+                        (mu * mu + x_chunk * x_chunk - 2 * x_chunk * mu) * (prec**2),
+                        dim=2,
+                        keepdim=True,
+                    )
+
+                    log_p_list.append(log_p_chunk)
+
+                log_p = torch.cat(log_p_list, dim=0)
+            else:
+                log_p = torch.sum(
+                    (mu * mu + x * x - 2 * x * mu) * (prec**2), dim=2, keepdim=True
+                )
             log_det = torch.sum(torch.log(prec), dim=2, keepdim=True)
 
             return -0.5 * (self.n_features * np.log(2.0 * pi) + log_p) + log_det
@@ -645,11 +675,11 @@ class GaussianMixture(torch.nn.Module):
         x = (x - x_min) / (x_max - x_min)
 
         min_cost = np.inf
-        random_state = check_random_state(self.random_state)
+        random_state_instance = check_random_state(self.random_state)
 
         for i in range(init_times):
             tmp_center = x[
-                random_state.choice(
+                random_state_instance.choice(
                     np.arange(x.shape[0]), size=n_centers, replace=False
                 ),
                 ...,
